@@ -1,0 +1,26 @@
+{
+  "title": "Qidong Water",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Qidong Water",
+        "description": "Enter the wid from the WeChat water-payment request. Treat it as a credential. Bound water accounts are discovered automatically, including accounts added later.",
+        "data": {
+          "wid": "WeChat wid"
+        },
+        "data_description": {
+          "wid": "The wid inside the param JSON sent to getTotalNew.action; the history endpoint uses the same value as wxid."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the Qidong Water service.",
+      "invalid_response": "The service returned an unexpected response. Check whether the wid is still valid.",
+      "no_accounts": "Connected successfully, but no bound water accounts were found.",
+      "unknown": "Unexpected error. Check the Home Assistant log."
+    },
+    "abort": {
+      "already_configured": "This wid is already configured."
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "title": "祁东水务",
+  "config": {
+    "step": {
+      "user": {
+        "title": "连接祁东水务",
+        "description": "输入微信水务页面请求中的 wid。该值可查询你绑定的水表，请按凭据保管。集成会自动发现当前和以后新绑定的户号。",
+        "data": {
+          "wid": "微信 wid"
+        },
+        "data_description": {
+          "wid": "Fiddler 中 getTotalNew.action 请求 param JSON 内的 wid；也是历史接口使用的 wxid。"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "无法连接祁东水务服务器，请稍后重试。",
+      "invalid_response": "服务器返回内容不符合预期，请确认 wid 仍然有效。",
+      "no_accounts": "连接成功，但没有发现已绑定的水表户号。",
+      "unknown": "发生未知错误，请查看 Home Assistant 日志。"
+    },
+    "abort": {
+      "already_configured": "这个 wid 已经配置过了。"
+    }
+  }
+}
