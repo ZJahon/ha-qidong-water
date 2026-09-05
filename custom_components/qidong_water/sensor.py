@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -18,6 +19,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .billing import calculate_residential_bill, to_decimal
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import AccountData, QidongWaterCoordinator
 
@@ -42,6 +44,39 @@ def _history(account: AccountData) -> list[dict[str, Any]]:
 def _latest_history(account: AccountData) -> dict[str, Any]:
     records = _history(account)
     return records[0] if records else {}
+
+
+def _bill_calc(account: AccountData) -> dict[str, Decimal | str] | None:
+    return calculate_residential_bill(_latest_history(account).get("sl"))
+
+
+def _bill_calc_number(account: AccountData, key: str) -> float | None:
+    calc = _bill_calc(account)
+    if calc is None:
+        return None
+    value = calc.get(key)
+    if isinstance(value, Decimal):
+        return float(value)
+    return None
+
+
+def _bill_calc_text(account: AccountData, key: str) -> str | None:
+    calc = _bill_calc(account)
+    if calc is None:
+        return None
+    value = calc.get(key)
+    return str(value) if value is not None else None
+
+
+def _bill_difference(account: AccountData) -> float | None:
+    calc = _bill_calc(account)
+    actual = to_decimal(_latest_history(account).get("hjfy"))
+    if calc is None or actual is None:
+        return None
+    estimated = calc.get("estimated_total")
+    if not isinstance(estimated, Decimal):
+        return None
+    return float((actual - estimated).quantize(Decimal("0.01")))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -94,25 +129,86 @@ SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
         value_fn=lambda a: _to_float(_latest_history(a).get("sl")),
     ),
     QidongWaterSensorEntityDescription(
+        key="latest_bill_tier",
+        name="最近账单阶梯",
+        value_fn=lambda a: _bill_calc_text(a, "tier"),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_marginal_price",
+        name="最近账单边际综合单价",
+        native_unit_of_measurement="CNY/m³",
+        value_fn=lambda a: _bill_calc_number(a, "marginal_all_in_price"),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_base_water_cost",
+        name="最近账单基础水价费用（测算）",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _bill_calc_number(a, "base_cost"),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_water_resource_fee",
+        name="最近账单水资源费（测算）",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _bill_calc_number(a, "water_resource_fee"),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_garbage_fee",
+        name="最近账单生活垃圾处理费（测算）",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _bill_calc_number(a, "garbage_treatment_fee"),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_sewage_fee_estimated",
+        name="最近账单污水处理费（测算）",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _bill_calc_number(a, "sewage_treatment_fee"),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_estimated_total",
+        name="最近账单阶梯测算总费用",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _bill_calc_number(a, "estimated_total"),
+    ),
+    QidongWaterSensorEntityDescription(
         key="latest_bill_total_cost",
-        name="最近账单总费用",
+        name="最近账单实际总费用",
         native_unit_of_measurement="CNY",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=lambda a: _to_float(_latest_history(a).get("hjfy")),
     ),
     QidongWaterSensorEntityDescription(
         key="latest_bill_water_cost",
-        name="最近账单水费",
+        name="最近账单实际水费及代收费（不含污水）",
         native_unit_of_measurement="CNY",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=lambda a: _to_float(_latest_history(a).get("sf")),
     ),
     QidongWaterSensorEntityDescription(
         key="latest_bill_sewage_cost",
-        name="最近账单污水处理费",
+        name="最近账单实际污水处理费",
         native_unit_of_measurement="CNY",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=lambda a: _to_float(_latest_history(a).get("wsclf")),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_actual_difference",
+        name="最近账单实际与测算差额",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=_bill_difference,
+    ),
+    QidongWaterSensorEntityDescription(
+        key="tracked_actual_cost",
+        name="累计实际水费",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda a: _to_float(a.get("tracked_actual_cost")),
     ),
 )
 
@@ -227,9 +323,40 @@ class QidongWaterSensor(CoordinatorEntity[QidongWaterCoordinator], SensorEntity)
                     "本月表数": latest.get("bybs"),
                     "用水量": latest.get("sl"),
                     "合计费用": latest.get("hjfy"),
-                    "水费": latest.get("sf"),
-                    "污水处理费": latest.get("wsclf"),
+                    "实际水费及代收费（不含污水）": latest.get("sf"),
+                    "实际污水处理费": latest.get("wsclf"),
                     "最近10期": _history(account)[:10],
+                }
+            )
+
+        if self.entity_description.key in {
+            "latest_bill_tier",
+            "latest_bill_estimated_total",
+            "latest_bill_actual_difference",
+        }:
+            calc = _bill_calc(account)
+            if calc is not None:
+                attrs.update(
+                    {
+                        "阶梯规则": "月用水≤25m³一阶；25-35m³二阶；>35m³三阶",
+                        "一阶基础水价": "2.29 CNY/m³",
+                        "二阶基础水价": "3.435 CNY/m³",
+                        "三阶基础水价": "6.87 CNY/m³",
+                        "水资源费": "0.08 CNY/m³",
+                        "生活垃圾处理费": "0.26 CNY/m³",
+                        "污水处理费": "0.85 CNY/m³",
+                        "距下一阶剩余水量": float(calc["remaining_to_next_tier"]),
+                    }
+                )
+
+        if self.entity_description.key == "tracked_actual_cost":
+            latest = _latest_history(account)
+            attrs.update(
+                {
+                    "数据来源": "水务实际账单 hjfy",
+                    "最近已见账单月份": latest.get("ysny"),
+                    "最近实际账单": latest.get("hjfy"),
+                    "说明": "本地持久化累计，适合作为 HA 能源→水→费用统计；首次启用以接口可见历史账单建立基线。",
                 }
             )
 

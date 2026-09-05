@@ -1,12 +1,14 @@
 {
   "domain": "qidong_water",
   "name": "祁东水务",
-  "codeowners": ["@ZJahon"],
+  "codeowners": [
+    "@YOUR_GITHUB_USERNAME"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/ZJahon/ha-qidong-water",
-  "issue_tracker": "https://github.com/ZJahon/ha-qidong-water/issues",
+  "documentation": "https://github.com/YOUR_GITHUB_USERNAME/ha-qidong-water",
+  "issue_tracker": "https://github.com/YOUR_GITHUB_USERNAME/ha-qidong-water/issues",
   "integration_type": "hub",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }
