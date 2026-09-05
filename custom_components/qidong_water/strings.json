@@ -11,6 +11,19 @@
         "data_description": {
           "wid": "Fiddler 中 getTotalNew.action 请求 param JSON 内的 wid；也是历史接口使用的 wxid。"
         }
+      },
+      "options": {
+        "title": "祁东水务参数",
+        "description": "配置刷新频率和阶梯水价。",
+        "data": {
+          "update_interval": "刷新间隔（小时）",
+          "tariff_tier1": "居民一阶水价",
+          "tariff_tier2": "居民二阶水价",
+          "tariff_tier3": "居民三阶水价",
+          "water_resource_fee": "水资源费",
+          "garbage_fee": "生活垃圾处理费",
+          "sewage_fee": "污水处理费"
+        }
       }
     },
     "error": {

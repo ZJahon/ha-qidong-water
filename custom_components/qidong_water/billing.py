@@ -38,7 +38,7 @@ def money(value: Decimal) -> Decimal:
     return value.quantize(MONEY_QUANT, rounding=ROUND_HALF_UP)
 
 
-def calculate_residential_bill(usage_value: Any) -> dict[str, Decimal | str] | None:
+def calculate_residential_bill(usage_value: Any, options: dict[str, Any] | None = None) -> dict[str, Decimal | str] | None:
     """Calculate the Qidong residential monthly progressive water bill.
 
     The progressive part applies only to the base water price. Water-resource,
@@ -49,18 +49,26 @@ def calculate_residential_bill(usage_value: Any) -> dict[str, Decimal | str] | N
     if usage is None or usage < 0:
         return None
 
+    options = options or {}
+    tier1_price = to_decimal(options.get("tariff_tier1")) or BASE_PRICE_TIER_1
+    tier2_price = to_decimal(options.get("tariff_tier2")) or BASE_PRICE_TIER_2
+    tier3_price = to_decimal(options.get("tariff_tier3")) or BASE_PRICE_TIER_3
+    resource_price = to_decimal(options.get("water_resource_fee")) or WATER_RESOURCE_FEE
+    garbage_price = to_decimal(options.get("garbage_fee")) or GARBAGE_TREATMENT_FEE
+    sewage_price = to_decimal(options.get("sewage_fee")) or SEWAGE_TREATMENT_FEE
+
     first = min(usage, TIER_1_LIMIT)
     second = min(max(usage - TIER_1_LIMIT, Decimal("0")), TIER_2_LIMIT - TIER_1_LIMIT)
     third = max(usage - TIER_2_LIMIT, Decimal("0"))
 
     base_raw = (
-        first * BASE_PRICE_TIER_1
-        + second * BASE_PRICE_TIER_2
-        + third * BASE_PRICE_TIER_3
+        first * tier1_price
+        + second * tier2_price
+        + third * tier3_price
     )
-    resource_raw = usage * WATER_RESOURCE_FEE
-    garbage_raw = usage * GARBAGE_TREATMENT_FEE
-    sewage_raw = usage * SEWAGE_TREATMENT_FEE
+    resource_raw = usage * resource_price
+    garbage_raw = usage * garbage_price
+    sewage_raw = usage * sewage_price
 
     base_cost = money(base_raw)
     resource_fee = money(resource_raw)
@@ -70,32 +78,23 @@ def calculate_residential_bill(usage_value: Any) -> dict[str, Decimal | str] | N
 
     if usage <= TIER_1_LIMIT:
         tier = "一阶"
-        marginal_base_price = BASE_PRICE_TIER_1
+        marginal_base_price = tier1_price
         marginal_all_in_price = (
-            BASE_PRICE_TIER_1
-            + WATER_RESOURCE_FEE
-            + GARBAGE_TREATMENT_FEE
-            + SEWAGE_TREATMENT_FEE
+            tier1_price + resource_price + garbage_price + sewage_price
         )
         remaining = max(TIER_1_LIMIT - usage, Decimal("0"))
     elif usage <= TIER_2_LIMIT:
         tier = "二阶"
-        marginal_base_price = BASE_PRICE_TIER_2
+        marginal_base_price = tier2_price
         marginal_all_in_price = (
-            BASE_PRICE_TIER_2
-            + WATER_RESOURCE_FEE
-            + GARBAGE_TREATMENT_FEE
-            + SEWAGE_TREATMENT_FEE
+            tier2_price + resource_price + garbage_price + sewage_price
         )
         remaining = max(TIER_2_LIMIT - usage, Decimal("0"))
     else:
         tier = "三阶"
-        marginal_base_price = BASE_PRICE_TIER_3
+        marginal_base_price = tier3_price
         marginal_all_in_price = (
-            BASE_PRICE_TIER_3
-            + WATER_RESOURCE_FEE
-            + GARBAGE_TREATMENT_FEE
-            + SEWAGE_TREATMENT_FEE
+            tier3_price + resource_price + garbage_price + sewage_price
         )
         remaining = Decimal("0")
 

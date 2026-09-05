@@ -47,7 +47,7 @@ def _latest_history(account: AccountData) -> dict[str, Any]:
 
 
 def _bill_calc(account: AccountData) -> dict[str, Decimal | str] | None:
-    return calculate_residential_bill(_latest_history(account).get("sl"))
+    return calculate_residential_bill(_latest_history(account).get("sl"), account.get("options"))
 
 
 def _bill_calc_number(account: AccountData, key: str) -> float | None:

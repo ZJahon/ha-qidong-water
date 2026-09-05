@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from datetime import timedelta
 import logging
 from typing import Any
 
@@ -13,7 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import QidongWaterApi, QidongWaterApiError
 from .billing import to_decimal
-from .const import DEFAULT_UPDATE_INTERVAL, DOMAIN
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class QidongWaterCoordinator(DataUpdateCoordinator[CoordinatorData]):
             _LOGGER,
             name=DOMAIN,
             config_entry=entry,
-            update_interval=DEFAULT_UPDATE_INTERVAL,
+            update_interval=timedelta(hours=int(entry.options.get("update_interval", 6))),
         )
         self.api = api
         self._store: Store[dict[str, Any]] = Store(
@@ -133,6 +134,7 @@ class QidongWaterCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "history": history,
                 "history_error": history_error,
                 "tracked_actual_cost": tracked_actual_cost,
+                "options": self.config_entry.options,
             }
 
         if not result:
