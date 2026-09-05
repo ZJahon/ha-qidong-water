@@ -1,0 +1,4 @@
+zip -r release.zip . \
+-x ".github/*" \
+-x ".gitignore" \
+-x "tests/*"
