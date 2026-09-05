@@ -81,14 +81,25 @@ class QidongWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders=description_placeholders,
         )
 
-    async def async_step_options(
+
+class QidongWaterOptionsFlow(config_entries.OptionsFlow):
+    """Handle Qidong Water options."""
+
+    async def async_step_init(
         self, user_input: dict | None = None
     ) -> ConfigFlowResult:
-        """Configure refresh interval and Qidong tariff."""
-        if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+        """Manage options."""
 
-        options = {**DEFAULT_TARIFF_OPTIONS, **self.config_entry.options}
+        if user_input is not None:
+            return self.async_create_entry(
+                title="",
+                data=user_input,
+            )
+
+        options = {
+            **DEFAULT_TARIFF_OPTIONS,
+            **self.config_entry.options,
+        }
 
         schema = vol.Schema(
             {
@@ -96,31 +107,47 @@ class QidongWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_UPDATE_INTERVAL,
                     default=options[CONF_UPDATE_INTERVAL],
                 ): vol.InRange(min=1, max=168),
+
                 vol.Required(
                     CONF_TARIFF_TIER1,
                     default=options[CONF_TARIFF_TIER1],
                 ): vol.Coerce(float),
+
                 vol.Required(
                     CONF_TARIFF_TIER2,
                     default=options[CONF_TARIFF_TIER2],
                 ): vol.Coerce(float),
+
                 vol.Required(
                     CONF_TARIFF_TIER3,
                     default=options[CONF_TARIFF_TIER3],
                 ): vol.Coerce(float),
+
                 vol.Required(
                     CONF_WATER_RESOURCE,
                     default=options[CONF_WATER_RESOURCE],
                 ): vol.Coerce(float),
+
                 vol.Required(
                     CONF_GARBAGE,
                     default=options[CONF_GARBAGE],
                 ): vol.Coerce(float),
+
                 vol.Required(
                     CONF_SEWAGE,
                     default=options[CONF_SEWAGE],
                 ): vol.Coerce(float),
             }
         )
-        return self.async_show_form(step_id="options", data_schema=schema)
 
+        return self.async_show_form(
+            step_id="init",
+            data_schema=schema,
+        )
+
+
+async def async_get_options_flow(
+    config_entry: config_entries.ConfigEntry,
+) -> QidongWaterOptionsFlow:
+    """Get the options flow."""
+    return QidongWaterOptionsFlow()
