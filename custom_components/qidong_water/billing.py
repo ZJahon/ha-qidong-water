@@ -5,7 +5,9 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
-# Qidong residential monthly tier thresholds (m³)
+from .const import CONF_TIER1_LIMIT, CONF_TIER2_LIMIT
+
+# Default monthly tier thresholds (m³)
 TIER_1_LIMIT = Decimal("25")
 TIER_2_LIMIT = Decimal("35")
 
@@ -46,20 +48,32 @@ def calculate_residential_bill(usage_value: Any, options: dict[str, Any] | None 
     whole monthly usage.
     """
     usage = to_decimal(usage_value)
-    if usage is None or usage < 0:
+    if usage is None or not usage.is_finite() or usage < 0:
         return None
 
     options = options or {}
-    tier1_price = to_decimal(options.get("tariff_tier1")) or BASE_PRICE_TIER_1
-    tier2_price = to_decimal(options.get("tariff_tier2")) or BASE_PRICE_TIER_2
-    tier3_price = to_decimal(options.get("tariff_tier3")) or BASE_PRICE_TIER_3
-    resource_price = to_decimal(options.get("water_resource_fee")) or WATER_RESOURCE_FEE
-    garbage_price = to_decimal(options.get("garbage_fee")) or GARBAGE_TREATMENT_FEE
-    sewage_price = to_decimal(options.get("sewage_fee")) or SEWAGE_TREATMENT_FEE
+    tier1_limit = to_decimal(options.get(CONF_TIER1_LIMIT, TIER_1_LIMIT))
+    tier2_limit = to_decimal(options.get(CONF_TIER2_LIMIT, TIER_2_LIMIT))
+    if (
+        tier1_limit is None or tier2_limit is None
+        or not tier1_limit.is_finite() or not tier2_limit.is_finite()
+        or tier1_limit <= 0 or tier2_limit <= tier1_limit
+    ):
+        return None
+    tier1_price = to_decimal(options.get("tariff_tier1", BASE_PRICE_TIER_1))
+    tier2_price = to_decimal(options.get("tariff_tier2", BASE_PRICE_TIER_2))
+    tier3_price = to_decimal(options.get("tariff_tier3", BASE_PRICE_TIER_3))
+    resource_price = to_decimal(options.get("water_resource_fee", WATER_RESOURCE_FEE))
+    garbage_price = to_decimal(options.get("garbage_fee", GARBAGE_TREATMENT_FEE))
+    sewage_price = to_decimal(options.get("sewage_fee", SEWAGE_TREATMENT_FEE))
 
-    first = min(usage, TIER_1_LIMIT)
-    second = min(max(usage - TIER_1_LIMIT, Decimal("0")), TIER_2_LIMIT - TIER_1_LIMIT)
-    third = max(usage - TIER_2_LIMIT, Decimal("0"))
+    prices = (tier1_price, tier2_price, tier3_price, resource_price, garbage_price, sewage_price)
+    if any(price is None or not price.is_finite() or price < 0 for price in prices):
+        return None
+
+    first = min(usage, tier1_limit)
+    second = min(max(usage - tier1_limit, Decimal("0")), tier2_limit - tier1_limit)
+    third = max(usage - tier2_limit, Decimal("0"))
 
     base_raw = (
         first * tier1_price
@@ -76,20 +90,20 @@ def calculate_residential_bill(usage_value: Any, options: dict[str, Any] | None 
     sewage_fee = money(sewage_raw)
     total = money(base_cost + resource_fee + garbage_fee + sewage_fee)
 
-    if usage <= TIER_1_LIMIT:
+    if usage <= tier1_limit:
         tier = "一阶"
         marginal_base_price = tier1_price
         marginal_all_in_price = (
             tier1_price + resource_price + garbage_price + sewage_price
         )
-        remaining = max(TIER_1_LIMIT - usage, Decimal("0"))
-    elif usage <= TIER_2_LIMIT:
+        remaining = max(tier1_limit - usage, Decimal("0"))
+    elif usage <= tier2_limit:
         tier = "二阶"
         marginal_base_price = tier2_price
         marginal_all_in_price = (
             tier2_price + resource_price + garbage_price + sewage_price
         )
-        remaining = max(TIER_2_LIMIT - usage, Decimal("0"))
+        remaining = max(tier2_limit - usage, Decimal("0"))
     else:
         tier = "三阶"
         marginal_base_price = tier3_price
@@ -101,6 +115,14 @@ def calculate_residential_bill(usage_value: Any, options: dict[str, Any] | None 
     effective_price = money(total / usage) if usage > 0 else Decimal("0.00")
 
     return {
+        "tier1_limit": tier1_limit,
+        "tier2_limit": tier2_limit,
+        "tier1_price": tier1_price,
+        "tier2_price": tier2_price,
+        "tier3_price": tier3_price,
+        "resource_price": resource_price,
+        "garbage_price": garbage_price,
+        "sewage_price": sewage_price,
         "usage": usage,
         "tier": tier,
         "base_cost": base_cost,

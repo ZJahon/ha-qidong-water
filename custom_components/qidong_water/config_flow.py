@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any
 
 import voluptuous as vol
@@ -11,26 +12,17 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
+from homeassistant.helpers.selector import (
+    NumberSelector, NumberSelectorConfig, NumberSelectorMode,
+    TextSelector, TextSelectorConfig, TextSelectorType,
+)
 
 from .api import (
     QidongWaterApi,
     QidongWaterApiError,
     QidongWaterConnectionError,
 )
-from .const import (
-    CONF_GARBAGE,
-    CONF_SEWAGE,
-    CONF_TARIFF_TIER1,
-    CONF_TARIFF_TIER2,
-    CONF_TARIFF_TIER3,
-    CONF_UPDATE_INTERVAL,
-    CONF_WATER_RESOURCE,
-    CONF_WID,
-    DEFAULT_TARIFF_OPTIONS,
-    DOMAIN,
-    NAME,
-)
+from .const import (CONF_TIER1_LIMIT, CONF_TIER2_LIMIT, CONF_WID, DOMAIN, NAME, DEFAULT_TARIFF_OPTIONS, CONF_UPDATE_INTERVAL, CONF_TARIFF_TIER1, CONF_TARIFF_TIER2, CONF_TARIFF_TIER3, CONF_WATER_RESOURCE, CONF_GARBAGE, CONF_SEWAGE)
 
 
 def _wid_unique_id(wid: str) -> str:
@@ -49,6 +41,14 @@ class QidongWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Qidong Water."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> QidongWaterOptionsFlow:
+        """Create the options flow."""
+        return QidongWaterOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, str] | None = None
@@ -94,16 +94,8 @@ class QidongWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders=description_placeholders,
         )
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(
-        config_entry: config_entries.ConfigEntry,
-    ) -> config_entries.OptionsFlow:
-        """Get the options flow."""
-        return QidongWaterOptionsFlow()
 
-
-class QidongWaterOptionsFlow(config_entries.OptionsFlow):
+class QidongWaterOptionsFlow(config_entries.OptionsFlowWithReload):
     """Handle Qidong Water options."""
 
     async def async_step_init(
@@ -111,23 +103,53 @@ class QidongWaterOptionsFlow(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         """Manage options."""
 
+        errors: dict[str, str] = {}
+        options = {**DEFAULT_TARIFF_OPTIONS, **self.config_entry.options}
         if user_input is not None:
-            return self.async_create_entry(
-                title="",
-                data=user_input,
-            )
-
-        options = {
-            **DEFAULT_TARIFF_OPTIONS,
-            **self.config_entry.options,
-        }
+            options.update(user_input)
+            for key in DEFAULT_TARIFF_OPTIONS:
+                try:
+                    value = float(options[key])
+                except (TypeError, ValueError, OverflowError):
+                    errors[key] = "invalid_number"
+                    continue
+                if not math.isfinite(value) or value < 0:
+                    errors[key] = "invalid_number"
+                elif key == CONF_UPDATE_INTERVAL and (
+                    not value.is_integer() or not 1 <= value <= 168
+                ):
+                    errors[key] = "invalid_interval"
+                elif key in (CONF_TIER1_LIMIT, CONF_TIER2_LIMIT) and value <= 0:
+                    errors[key] = "invalid_limit"
+                else:
+                    options[key] = value
+            if not errors and options[CONF_TIER2_LIMIT] <= options[CONF_TIER1_LIMIT]:
+                errors[CONF_TIER2_LIMIT] = "invalid_tier_order"
+            if not errors:
+                options[CONF_UPDATE_INTERVAL] = int(options[CONF_UPDATE_INTERVAL])
+                return self.async_create_entry(title="", data=options)
 
         schema = vol.Schema(
             {
                 vol.Required(
                     CONF_UPDATE_INTERVAL,
                     default=options[CONF_UPDATE_INTERVAL],
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=168)),
+                ): NumberSelector(NumberSelectorConfig(
+                    min=1, max=168, step=1, mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="h",
+                )),
+                vol.Required(
+                    CONF_TIER1_LIMIT, default=options[CONF_TIER1_LIMIT],
+                ): NumberSelector(NumberSelectorConfig(
+                    min=0.01, step=0.01, mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="m³",
+                )),
+                vol.Required(
+                    CONF_TIER2_LIMIT, default=options[CONF_TIER2_LIMIT],
+                ): NumberSelector(NumberSelectorConfig(
+                    min=0.01, step=0.01, mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="m³",
+                )),
 
                 vol.Required(
                     CONF_TARIFF_TIER1,
@@ -164,4 +186,6 @@ class QidongWaterOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
+            errors=errors,
         )
+

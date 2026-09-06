@@ -27,7 +27,7 @@
     "step": {
       "init": {
         "title": "Qidong Water options",
-        "description": "Configure the refresh interval and tiered water rates.",
+        "description": "Configure refresh interval, monthly tier limits and prices. Base water charges are progressive. The integration reloads after saving.",
         "data": {
           "update_interval": "Refresh interval (hours)",
           "tariff_tier1": "Residential tier 1 water rate",
@@ -35,9 +35,22 @@
           "tariff_tier3": "Residential tier 3 water rate",
           "water_resource_fee": "Water resource fee",
           "garbage_fee": "Household waste disposal fee",
-          "sewage_fee": "Sewage treatment fee"
+          "sewage_fee": "Sewage treatment fee",
+          "tier1_limit": "Tier 1 / tier 2 boundary (m³/month)",
+          "tier2_limit": "Tier 2 / tier 3 boundary (m³/month)"
+        },
+        "data_description": {
+          "update_interval": "Enter a whole number from 1 to 168; 6 means every 6 hours.",
+          "tier1_limit": "Tier 1 upper limit, default 25. Usage above this limit enters tier 2.",
+          "tier2_limit": "Cumulative tier 2 upper limit, default 35. Must exceed the first limit; excess usage enters tier 3."
         }
       }
+    },
+    "error": {
+      "invalid_number": "Enter a finite non-negative number.",
+      "invalid_interval": "Enter a whole number of hours from 1 to 168.",
+      "invalid_limit": "The usage boundary must be greater than zero.",
+      "invalid_tier_order": "The second boundary must exceed the first boundary."
     }
   }
 }
