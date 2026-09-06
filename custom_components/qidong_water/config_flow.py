@@ -126,6 +126,9 @@ class QidongWaterOptionsFlow(config_entries.OptionsFlowWithReload):
             if not errors and options[CONF_TIER2_LIMIT] <= options[CONF_TIER1_LIMIT]:
                 errors[CONF_TIER2_LIMIT] = "invalid_tier_order"
             if not errors:
+                # Retire the old monthly fields; annual fields use separate keys.
+                options.pop("tier1_limit", None)
+                options.pop("tier2_limit", None)
                 options[CONF_UPDATE_INTERVAL] = int(options[CONF_UPDATE_INTERVAL])
                 return self.async_create_entry(title="", data=options)
 

@@ -13,7 +13,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import QidongWaterApi, QidongWaterApiError
-from .billing import to_decimal
+from .billing import merge_usage_history, normalize_bill_month, to_decimal
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -128,11 +128,17 @@ class QidongWaterCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 custcode, history
             )
             storage_changed = storage_changed or changed
+            tracker = self._billing_state["accounts"][custcode]
+            usage_history = tracker.setdefault("usage_history", {})
+            usage_changed = merge_usage_history(usage_history, history)
+            storage_changed = storage_changed or usage_changed
+            history.sort(key=lambda row: normalize_bill_month(row.get("ysny")) or "", reverse=True)
 
             result[custcode] = {
                 "current": current,
                 "history": history,
                 "history_error": history_error,
+                "usage_history": dict(usage_history),
                 "tracked_actual_cost": tracked_actual_cost,
                 "options": self.config_entry.options,
             }

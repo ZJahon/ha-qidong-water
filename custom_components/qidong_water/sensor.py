@@ -19,7 +19,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .billing import calculate_residential_bill, to_decimal
+from .billing import annual_usage_context, calculate_residential_bill, to_decimal
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import AccountData, QidongWaterCoordinator
 
@@ -47,7 +47,13 @@ def _latest_history(account: AccountData) -> dict[str, Any]:
 
 
 def _bill_calc(account: AccountData) -> dict[str, Decimal | str] | None:
-    return calculate_residential_bill(_latest_history(account).get("sl"), account.get("options"))
+    latest = _latest_history(account)
+    context = annual_usage_context(latest, account.get("usage_history", {}))
+    if not context["complete"]:
+        return None
+    return calculate_residential_bill(
+        latest.get("sl"), account.get("options"), context["prior_usage"],
+    )
 
 
 def _bill_calc_number(account: AccountData, key: str) -> float | None:
@@ -334,12 +340,18 @@ class QidongWaterSensor(CoordinatorEntity[QidongWaterCoordinator], SensorEntity)
             "latest_bill_estimated_total",
             "latest_bill_actual_difference",
         }:
+            context = annual_usage_context(_latest_history(account), account.get("usage_history", {}))
+            attrs.update({
+                "年度计费数据状态": context["reason"],
+                "缺失或无效水量月份": context["missing_months"],
+                "计费周期": "自然年（按账单月份归属）",
+            })
             calc = _bill_calc(account)
             if calc is not None:
                 attrs.update(
                     {
-                        "阶梯规则": (f"月用水≤{calc['tier1_limit']:g}m³一阶；"
-                            f"{calc['tier1_limit']:g}<月用水≤{calc['tier2_limit']:g}m³二阶；"
+                        "阶梯规则": (f"年累计用水≤{calc['tier1_limit']:g}m³一阶；"
+                            f"{calc['tier1_limit']:g}<年累计用水≤{calc['tier2_limit']:g}m³二阶；"
                             f">{calc['tier2_limit']:g}m³三阶"),
                         "一阶基础水价": f"{calc['tier1_price']:g} CNY/m³",
                         "二阶基础水价": f"{calc['tier2_price']:g} CNY/m³",
@@ -347,6 +359,13 @@ class QidongWaterSensor(CoordinatorEntity[QidongWaterCoordinator], SensorEntity)
                         "水资源费": f"{calc['resource_price']:g} CNY/m³",
                         "生活垃圾处理费": f"{calc['garbage_price']:g} CNY/m³",
                         "污水处理费": f"{calc['sewage_price']:g} CNY/m³",
+                        "账单所属年份": context["year"],
+                        "本期前年度累计水量": float(calc["prior_annual_usage"]),
+                        "截至本期年度累计水量": float(calc["annual_usage"]),
+                        "本期一阶计费水量": float(calc["tier1_usage"]),
+                        "本期二阶计费水量": float(calc["tier2_usage"]),
+                        "本期三阶计费水量": float(calc["tier3_usage"]),
+                        "阶梯含义": "截至本期账单的年度累计水量所在阶梯，本期费用按跨阶水量分段计算",
                         "距下一阶剩余水量": float(calc["remaining_to_next_tier"]),
                     }
                 )

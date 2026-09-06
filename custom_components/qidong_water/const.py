@@ -7,8 +7,8 @@ NAME = "祁东水务"
 
 CONF_WID = "wid"
 CONF_UPDATE_INTERVAL = "update_interval"
-CONF_TIER1_LIMIT = "tier1_limit"
-CONF_TIER2_LIMIT = "tier2_limit"
+CONF_TIER1_LIMIT = "annual_tier1_limit"
+CONF_TIER2_LIMIT = "annual_tier2_limit"
 CONF_TARIFF_TIER1 = "tariff_tier1"
 CONF_TARIFF_TIER2 = "tariff_tier2"
 CONF_TARIFF_TIER3 = "tariff_tier3"
@@ -18,8 +18,8 @@ CONF_SEWAGE = "sewage_fee"
 
 DEFAULT_TARIFF_OPTIONS = {
     CONF_UPDATE_INTERVAL: 6,
-    CONF_TIER1_LIMIT: 25,
-    CONF_TIER2_LIMIT: 35,
+    CONF_TIER1_LIMIT: 300,
+    CONF_TIER2_LIMIT: 420,
     CONF_TARIFF_TIER1: 2.29,
     CONF_TARIFF_TIER2: 3.435,
     CONF_TARIFF_TIER3: 6.87,
