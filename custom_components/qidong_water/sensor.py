@@ -15,11 +15,16 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .billing import annual_usage_context, calculate_residential_bill, to_decimal
+from .billing import (
+    annual_usage_context, calculate_residential_bill, merge_usage_history,
+    recorded_year_usage, to_decimal, infer_fixed_bill_rate,
+    calculate_observed_fixed_bill,
+)
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import AccountData, QidongWaterCoordinator
 
@@ -46,10 +51,33 @@ def _latest_history(account: AccountData) -> dict[str, Any]:
     return records[0] if records else {}
 
 
+def _recorded_usage(account: AccountData) -> dict[str, Any]:
+    """Combine persisted and current records without counting a month twice."""
+    stored = dict(account.get("usage_history", {}))
+    merge_usage_history(stored, _history(account))
+    return stored
+
+
+def _annual_context(account: AccountData) -> dict[str, Any]:
+    return annual_usage_context(_latest_history(account), _recorded_usage(account))
+
+
+def _year_context(account: AccountData) -> dict[str, Any]:
+    return recorded_year_usage(_recorded_usage(account), dt_util.now().year)
+
+
+def _year_usage(account: AccountData) -> float | None:
+    value = _year_context(account)["usage"]
+    return float(value) if value is not None else None
+
+
 def _bill_calc(account: AccountData) -> dict[str, Decimal | str] | None:
     latest = _latest_history(account)
-    context = annual_usage_context(latest, account.get("usage_history", {}))
-    if not context["complete"]:
+    inferred = infer_fixed_bill_rate(_history(account))
+    if inferred is not None:
+        return calculate_observed_fixed_bill(latest.get("sl"), inferred["rate"])
+    context = _annual_context(account)
+    if not context["calculable"]:
         return None
     return calculate_residential_bill(
         latest.get("sl"), account.get("options"), context["prior_usage"],
@@ -57,7 +85,14 @@ def _bill_calc(account: AccountData) -> dict[str, Decimal | str] | None:
 
 
 def _bill_calc_number(account: AccountData, key: str) -> float | None:
-    calc = _bill_calc(account)
+    # Do not reintroduce residential fees for a recognized special-price meter.
+    if infer_fixed_bill_rate(_history(account)) is not None:
+        calc = _bill_calc(account)
+    # Per-volume add-on charges depend only on this bill's volume.
+    elif key in {"water_resource_fee", "garbage_treatment_fee", "sewage_treatment_fee"}:
+        calc = calculate_residential_bill(_latest_history(account).get("sl"), account.get("options"), 0)
+    else:
+        calc = _bill_calc(account)
     if calc is None:
         return None
     value = calc.get(key)
@@ -71,7 +106,11 @@ def _bill_calc_text(account: AccountData, key: str) -> str | None:
     if calc is None:
         return None
     value = calc.get(key)
-    return str(value) if value is not None else None
+    if value is None:
+        return None
+    if key == "tier" and calc.get("billing_mode") != "observed_fixed" and not _annual_context(account)["complete"]:
+        return f"{value}（估算）"
+    return str(value)
 
 
 def _bill_difference(account: AccountData) -> float | None:
@@ -93,6 +132,13 @@ class QidongWaterSensorEntityDescription(SensorEntityDescription):
 
 
 SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
+    QidongWaterSensorEntityDescription(
+        key="annual_usage",
+        name="19 年累计用水量（已记录）",
+        native_unit_of_measurement="m³",
+        device_class=SensorDeviceClass.WATER,
+        value_fn=_year_usage,
+    ),
     QidongWaterSensorEntityDescription(
         key="balance",
         name="01 余额",
@@ -136,18 +182,18 @@ SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
     ),
     QidongWaterSensorEntityDescription(
         key="latest_bill_tier",
-        name="08 最近账单阶梯",
+        name="08 最近账单计费方式／阶梯",
         value_fn=lambda a: _bill_calc_text(a, "tier"),
     ),
     QidongWaterSensorEntityDescription(
         key="latest_bill_marginal_price",
-        name="18 最近账单边际综合单价",
+        name="18 最近账单适用综合单价",
         native_unit_of_measurement="CNY/m³",
         value_fn=lambda a: _bill_calc_number(a, "marginal_all_in_price"),
     ),
     QidongWaterSensorEntityDescription(
         key="latest_bill_base_water_cost",
-        name="13 最近账单基础水价费用（测算）",
+        name="13 最近账单水费（测算）",
         native_unit_of_measurement="CNY",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=lambda a: _bill_calc_number(a, "base_cost"),
@@ -175,7 +221,7 @@ SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
     ),
     QidongWaterSensorEntityDescription(
         key="latest_bill_estimated_total",
-        name="12 最近账单阶梯测算总费用",
+        name="12 最近账单测算总费用",
         native_unit_of_measurement="CNY",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=lambda a: _bill_calc_number(a, "estimated_total"),
@@ -339,11 +385,38 @@ class QidongWaterSensor(CoordinatorEntity[QidongWaterCoordinator], SensorEntity)
             "latest_bill_tier",
             "latest_bill_estimated_total",
             "latest_bill_actual_difference",
+            "latest_bill_base_water_cost",
+            "latest_bill_water_resource_fee",
+            "latest_bill_garbage_fee",
+            "latest_bill_sewage_fee_estimated",
+            "latest_bill_marginal_price",
         }:
-            context = annual_usage_context(_latest_history(account), account.get("usage_history", {}))
+            inferred = infer_fixed_bill_rate(_history(account))
+            if inferred is not None:
+                attrs.update({
+                    "计费方式": "固定单价（账单识别）",
+                    "识别综合单价": float(inferred["rate"]),
+                    "识别账单期数": inferred["sample_count"],
+                    "识别账单月份": inferred["months"],
+                    "识别依据": "连续至少3期正水量账单，同一单价可复算水费；合计等于水费，垃圾费/其他项目/污水费均明确为0",
+                    "是否依赖年度阶梯": False,
+                    "水资源费处理": "接口未单列；计入识别综合单价，不再额外加计。0表示不另加计，并非确认政策免收",
+                    "水费口径": "按账单sf对应的综合水费口径测算，无法拆分sf内部未单列费用",
+                    "差额说明": "实际合计减识别单价测算值；识别使用了本期账单，差额为0不代表独立审价通过",
+                    "说明": "仅描述近期账单特征，不证明未来固定价或政策性质；每次刷新重新识别，不匹配时回到配置的年度阶梯测算",
+                })
+                return attrs
+            context = _annual_context(account)
             attrs.update({
+                "计费规则来源": "未识别到连续固定单价特征，按配置的年度阶梯规则测算",
                 "年度计费数据状态": context["reason"],
-                "缺失或无效水量月份": context["missing_months"],
+                "已记录账单水量有效": context["complete"],
+                "测算依据": "已记录的年内账单水量之和；跨月抄表水量计入出账月份，不重复分摊",
+                "是否依赖年度阶梯": self.entity_description.key not in {
+                    "latest_bill_water_resource_fee", "latest_bill_garbage_fee",
+                    "latest_bill_sewage_fee_estimated",
+                },
+                "水量无效或冲突的账单月份": context["missing_months"],
                 "计费周期": "自然年（按账单月份归属）",
             })
             calc = _bill_calc(account)
@@ -369,6 +442,19 @@ class QidongWaterSensor(CoordinatorEntity[QidongWaterCoordinator], SensorEntity)
                         "距下一阶剩余水量": float(calc["remaining_to_next_tier"]),
                     }
                 )
+
+        if self.entity_description.key == "annual_usage":
+            context = _year_context(account)
+            attrs.update({
+                "统计年份": context["year"],
+                "最近记录月份": context["latest_month"],
+                "已记录月份": context["months"],
+                "水量无效或冲突的账单月份": context["missing_months"],
+                "已记录账单水量有效": context["complete"],
+                "数据状态": ("已记录账单水量有效，允许跨月抄表" if context["complete"] else "本年无有效账单，或已有账单水量异常"),
+                "统计口径": "当前自然年已记录账单水量之和；不含待结算水量，不重复计入相同月份",
+                "说明": "未单独出账月份不视为缺失，水量随后续抄表账单累计；按已获取并保存的账单统计；无本年有效账单时显示未知",
+            })
 
         if self.entity_description.key == "tracked_actual_cost":
             latest = _latest_history(account)

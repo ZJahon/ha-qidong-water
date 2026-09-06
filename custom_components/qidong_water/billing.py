@@ -191,31 +191,108 @@ def merge_usage_history(
 def annual_usage_context(
     latest: dict[str, Any], stored: dict[str, Any],
 ) -> dict[str, Any]:
-    """Require all monthly volumes from January through the latest bill.
-
-    Missing months are not assumed to be zero: new accounts or non-monthly
-    billing require authoritative baseline information before estimation.
-    """
+    """Sum issued bills; manual meter readings need not occur every month."""
     month = normalize_bill_month(latest.get("ysny"))
-    if month is None:
-        return {"complete": False, "missing_months": [], "reason": "账单月份无效或无历史账单"}
+    current = to_decimal(latest.get("sl"))
+    if month is None or current is None or not current.is_finite() or current < 0:
+        return {"calculable": False, "complete": False, "missing_months": [],
+                "reason": "本期账单月份或水量无效，无法测算"}
     year, number = map(int, month.split("-"))
     missing = []
     prior = Decimal("0")
-    for index in range(1, number + 1):
+    for index in range(1, number):
         key = f"{year:04d}-{index:02d}"
-        value = to_decimal(stored.get(key))
+        if key not in stored:
+            # No bill for this month: its consumption may be in a later reading.
+            continue
+        value = to_decimal(stored[key])
         if value is None or not value.is_finite() or value < 0:
             missing.append(key)
-        elif index < number:
+        else:
             prior += value
-    current = to_decimal(latest.get("sl"))
-    if current is None or not current.is_finite() or current < 0:
-        if month not in missing:
-            missing.append(month)
-    if missing:
-        return {"complete": False, "year": year, "missing_months": missing,
-                "reason": "年内账单水量不完整，无法准确测算年度阶梯"}
-    return {"complete": True, "year": year, "missing_months": [],
-            "prior_usage": prior, "annual_usage": prior + current,
-            "reason": "按账单月份归属自然年；年内各月水量完整"}
+    # The current row is required; conflicting rows for its month stay invalid.
+    if month in stored and stored[month] is None:
+        return {"calculable": False, "complete": False, "missing_months": [month],
+                "reason": "本期账单水量记录冲突，无法测算"}
+    return {"calculable": True, "complete": not missing, "year": year,
+            "missing_months": missing, "prior_usage": prior,
+            "annual_usage": prior + current,
+            "reason": ("已有账单水量无效或冲突：仅按有效记录估算，可能低估阶梯和费用"
+                       if missing else "按已记录账单累计；人工抄表可跨月，未单独出账月份无需补零或补算")}
+
+
+def recorded_year_usage(stored: dict[str, Any], year: int) -> dict[str, Any]:
+    """Return recorded billed usage for one year, excluding unbilled usage."""
+    values = {}
+    for month, raw in stored.items():
+        normalized = normalize_bill_month(month)
+        value = to_decimal(raw)
+        if normalized and normalized.startswith(f"{year:04d}-"):
+            values[normalized] = value if value is not None and value.is_finite() and value >= 0 else None
+    valid = {month: value for month, value in values.items() if value is not None}
+    last = max(values, default=None)
+    missing = sorted(month for month, value in values.items() if value is None)
+    return {"year": year, "usage": sum(valid.values(), Decimal("0")) if valid else None,
+            "months": sorted(valid), "latest_month": last, "missing_months": missing,
+            "complete": bool(valid) and not missing}
+
+
+def infer_fixed_bill_rate(history: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Recognize a recent stable all-in rate, never a legal tariff policy.
+
+    Require three distinct positive-volume bills, including the latest positive
+    bill, with explicit zero add-ons. Missing fields are not zero. The candidate
+    rate must reproduce each bill after cent rounding. A mismatch ends the run.
+    """
+    rows = sorted(history, key=lambda row: normalize_bill_month(row.get("ysny")) or "", reverse=True)
+    seen: dict[str, tuple[Decimal, ...]] = {}
+    rate = None
+    months = []
+    for row in rows:
+        month = normalize_bill_month(row.get("ysny"))
+        values = tuple(to_decimal(row.get(key)) for key in ("sl", "sf", "hjfy", "ljclf", "qtxm", "wsclf"))
+        if month is None or any(v is None or not v.is_finite() or v < 0 for v in values):
+            break
+        if month in seen:
+            if seen[month] != values:
+                return None
+            continue
+        seen[month] = values
+        usage, water, total, garbage, other, sewage = values
+        if garbage != 0 or other != 0 or sewage != 0 or water != total:
+            break
+        if usage == 0:
+            if total != 0:
+                break
+            continue
+        candidate = (water / usage).quantize(PRICE_QUANT, rounding=ROUND_HALF_UP)
+        if rate is None:
+            rate = candidate
+        if money(usage * rate) != water:
+            break
+        months.append(month)
+    if rate is None or len(months) < 3:
+        return None
+    return {"rate": rate, "months": months, "sample_count": len(months)}
+
+
+def calculate_observed_fixed_bill(usage_value: Any, rate: Decimal) -> dict[str, Decimal | str] | None:
+    """Apply an observed all-in rate without adding default residential fees."""
+    usage = to_decimal(usage_value)
+    if usage is None or not usage.is_finite() or usage < 0:
+        return None
+    if not rate.is_finite() or rate < 0:
+        return None
+    total = money(usage * rate)
+    return {
+        "billing_mode": "observed_fixed",
+        "tier": "固定单价（账单识别）",
+        "usage": usage,
+        "base_cost": total,
+        "water_resource_fee": Decimal("0.00"),
+        "garbage_treatment_fee": Decimal("0.00"),
+        "sewage_treatment_fee": Decimal("0.00"),
+        "estimated_total": total,
+        "marginal_all_in_price": rate,
+        "effective_price": rate if usage else Decimal("0.00"),
+    }
