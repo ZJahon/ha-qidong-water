@@ -22,5 +22,22 @@
     "abort": {
       "already_configured": "This wid is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Qidong Water options",
+        "description": "Configure the refresh interval and tiered water rates.",
+        "data": {
+          "update_interval": "Refresh interval (hours)",
+          "tariff_tier1": "Residential tier 1 water rate",
+          "tariff_tier2": "Residential tier 2 water rate",
+          "tariff_tier3": "Residential tier 3 water rate",
+          "water_resource_fee": "Water resource fee",
+          "garbage_fee": "Household waste disposal fee",
+          "sewage_fee": "Sewage treatment fee"
+        }
+      }
+    }
   }
 }

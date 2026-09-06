@@ -47,7 +47,7 @@ def _latest_history(account: AccountData) -> dict[str, Any]:
 
 
 def _bill_calc(account: AccountData) -> dict[str, Decimal | str] | None:
-    return calculate_residential_bill(_latest_history(account).get("sl"), account.get("billing_options"))
+    return calculate_residential_bill(_latest_history(account).get("sl"), account.get("options"))
 
 
 def _bill_calc_number(account: AccountData, key: str) -> float | None:
@@ -87,7 +87,6 @@ class QidongWaterSensorEntityDescription(SensorEntityDescription):
 
 
 SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
-    # ===== 基础状态 =====
     QidongWaterSensorEntityDescription(
         key="balance",
         name="余额",
@@ -117,8 +116,6 @@ SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.MONETARY,
         value_fn=lambda a: _to_float(_current(a).get("fee")),
     ),
-
-    # ===== 水务实际账单 =====
     QidongWaterSensorEntityDescription(
         key="latest_bill_month",
         name="最近账单月份",
@@ -131,37 +128,6 @@ SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.WATER,
         value_fn=lambda a: _to_float(_latest_history(a).get("sl")),
     ),
-    QidongWaterSensorEntityDescription(
-        key="latest_bill_total_cost",
-        name="最近账单实际总费用",
-        native_unit_of_measurement="CNY",
-        device_class=SensorDeviceClass.MONETARY,
-        value_fn=lambda a: _to_float(_latest_history(a).get("hjfy")),
-    ),
-    QidongWaterSensorEntityDescription(
-        key="latest_bill_water_cost",
-        name="最近账单实际水费及代收费（不含污水）",
-        native_unit_of_measurement="CNY",
-        device_class=SensorDeviceClass.MONETARY,
-        value_fn=lambda a: _to_float(_latest_history(a).get("sf")),
-    ),
-    QidongWaterSensorEntityDescription(
-        key="latest_bill_sewage_cost",
-        name="最近账单实际污水处理费",
-        native_unit_of_measurement="CNY",
-        device_class=SensorDeviceClass.MONETARY,
-        value_fn=lambda a: _to_float(_latest_history(a).get("wsclf")),
-    ),
-    QidongWaterSensorEntityDescription(
-        key="tracked_actual_cost",
-        name="累计实际水费",
-        native_unit_of_measurement="CNY",
-        device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.TOTAL,
-        value_fn=lambda a: _to_float(a.get("tracked_actual_cost")),
-    ),
-
-    # ===== 阶梯测算 =====
     QidongWaterSensorEntityDescription(
         key="latest_bill_tier",
         name="最近账单阶梯",
@@ -209,14 +175,42 @@ SENSORS: tuple[QidongWaterSensorEntityDescription, ...] = (
         value_fn=lambda a: _bill_calc_number(a, "estimated_total"),
     ),
     QidongWaterSensorEntityDescription(
+        key="latest_bill_total_cost",
+        name="最近账单实际总费用",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _to_float(_latest_history(a).get("hjfy")),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_water_cost",
+        name="最近账单实际水费及代收费（不含污水）",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _to_float(_latest_history(a).get("sf")),
+    ),
+    QidongWaterSensorEntityDescription(
+        key="latest_bill_sewage_cost",
+        name="最近账单实际污水处理费",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        value_fn=lambda a: _to_float(_latest_history(a).get("wsclf")),
+    ),
+    QidongWaterSensorEntityDescription(
         key="latest_bill_actual_difference",
         name="最近账单实际与测算差额",
         native_unit_of_measurement="CNY",
         device_class=SensorDeviceClass.MONETARY,
         value_fn=_bill_difference,
     ),
+    QidongWaterSensorEntityDescription(
+        key="tracked_actual_cost",
+        name="累计实际水费",
+        native_unit_of_measurement="CNY",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        value_fn=lambda a: _to_float(a.get("tracked_actual_cost")),
+    ),
 )
-
 
 
 async def async_setup_entry(

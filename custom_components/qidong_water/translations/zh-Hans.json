@@ -22,5 +22,22 @@
     "abort": {
       "already_configured": "这个 wid 已经配置过了。"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "祁东水务参数",
+        "description": "配置刷新频率和阶梯水价。",
+        "data": {
+          "update_interval": "刷新间隔（小时）",
+          "tariff_tier1": "居民一阶水价",
+          "tariff_tier2": "居民二阶水价",
+          "tariff_tier3": "居民三阶水价",
+          "water_resource_fee": "水资源费",
+          "garbage_fee": "生活垃圾处理费",
+          "sewage_fee": "污水处理费"
+        }
+      }
+    }
   }
 }
